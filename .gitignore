@@ -1,0 +1,5 @@
+*.log
+*.pid
+*.tmp
+*.sqlite
+__pycache__/
