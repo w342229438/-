@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("Start", "Stop", "Status", "SelfTest", "Run")]
+  [ValidateSet("Start", "Stop", "Status", "SelfTest", "InstallStartup", "UninstallStartup", "Run")]
   [string]$Command = "Start",
   [int]$UsagePollSeconds = 30,
   [int]$PetPollMs = 100,
@@ -16,6 +16,7 @@ $AppDir = Join-Path $env:LOCALAPPDATA $AppName
 $PidPath = Join-Path $AppDir "overlay.pid"
 $LogPath = Join-Path $AppDir "overlay.log"
 $HoverShowSeconds = 10
+$StartupShortcutName = "Codex pet usage overlay.lnk"
 
 function U {
   param([string]$Text)
@@ -85,6 +86,42 @@ function Get-RunningOverlayProcess {
   } catch {
   }
   return @(Get-AllOverlayProcesses | Select-Object -First 1)[0]
+}
+
+function Get-StartupShortcutPath {
+  $startupDir = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
+  return Join-Path $startupDir $StartupShortcutName
+}
+
+function Install-StartupShortcut {
+  # ponytail: per-user Startup shortcut is enough; use Task Scheduler only if delayed/elevated startup is needed.
+  $scriptPath = [System.IO.Path]::GetFullPath($PSCommandPath)
+  $scriptDir = Split-Path -Parent $scriptPath
+  $powerShellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+  $shortcutPath = Get-StartupShortcutPath
+  $quotedScript = '"' + ($scriptPath -replace '"', '\"') + '"'
+  $quotedCodexHome = '"' + ([System.IO.Path]::GetFullPath($CodexHome) -replace '"', '\"') + '"'
+
+  $shell = New-Object -ComObject WScript.Shell
+  $shortcut = $shell.CreateShortcut($shortcutPath)
+  $shortcut.TargetPath = $powerShellPath
+  $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $quotedScript -Command Start -UsagePollSeconds $UsagePollSeconds -PetPollMs $PetPollMs -HoverPaddingPx $HoverPaddingPx -CodexHome $quotedCodexHome"
+  $shortcut.WorkingDirectory = $scriptDir
+  $shortcut.WindowStyle = 7
+  $shortcut.Description = "Start Codex pet usage overlay"
+  $shortcut.Save()
+
+  Write-Output ("Installed startup shortcut: {0}" -f $shortcutPath)
+}
+
+function Uninstall-StartupShortcut {
+  $shortcutPath = Get-StartupShortcutPath
+  if (Test-Path -LiteralPath $shortcutPath) {
+    Remove-Item -LiteralPath $shortcutPath -Force
+    Write-Output ("Removed startup shortcut: {0}" -f $shortcutPath)
+    return
+  }
+  Write-Output ("Startup shortcut not found: {0}" -f $shortcutPath)
 }
 
 function Start-Overlay {
@@ -481,6 +518,8 @@ con.close()
   Assert-True ($reenterUntil -gt $firstUntil) "leaving and re-entering should trigger a new 10-second display"
   $dipPoint = Convert-DevicePointToDip -Window $null -Point ([PSCustomObject]@{ X = 12; Y = 34 })
   Assert-True ($dipPoint.X -eq 12 -and $dipPoint.Y -eq 34) "DPI conversion should safely fall back without a WPF source"
+  $startupPath = Get-StartupShortcutPath
+  Assert-True (([System.IO.Path]::GetExtension($startupPath)) -ieq ".lnk") "startup shortcut path should point to a lnk file"
 
   Write-Output "SelfTest OK"
 }
@@ -488,6 +527,7 @@ con.close()
 function Show-Status {
   $running = Get-RunningOverlayProcess
   $state = Read-CodexState
+  $startupPath = Get-StartupShortcutPath
   $latestLog = ""
   if (Test-Path -LiteralPath $LogPath) {
     $latestLog = Get-Content -LiteralPath $LogPath -Tail 1
@@ -497,6 +537,8 @@ function Show-Status {
     ProcessId = if ($running) { $running.ProcessId } else { $null }
     PidFile = $PidPath
     LogFile = $LogPath
+    StartupShortcut = Test-Path -LiteralPath $startupPath
+    StartupShortcutPath = $startupPath
     CodexHome = [System.IO.Path]::GetFullPath($CodexHome)
     CodexStateFile = Test-Path -LiteralPath (Join-Path $CodexHome ".codex-global-state.json")
     PetOverlayOpen = if ($state) { [bool]$state.'electron-avatar-overlay-open' } else { $false }
@@ -771,5 +813,7 @@ switch ($Command) {
   "Stop" { Stop-Overlay }
   "Status" { Show-Status }
   "SelfTest" { Invoke-SelfTest }
+  "InstallStartup" { Install-StartupShortcut }
+  "UninstallStartup" { Uninstall-StartupShortcut }
   "Run" { Run-Overlay }
 }
