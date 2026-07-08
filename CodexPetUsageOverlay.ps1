@@ -17,6 +17,8 @@ $PidPath = Join-Path $AppDir "overlay.pid"
 $LogPath = Join-Path $AppDir "overlay.log"
 $HoverShowSeconds = 10
 $StartupShortcutName = "Codex pet usage overlay.lnk"
+$StartupRegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$StartupRegistryName = "CodexPetUsageOverlay"
 
 function U {
   param([string]$Text)
@@ -93,29 +95,61 @@ function Get-StartupShortcutPath {
   return Join-Path $startupDir $StartupShortcutName
 }
 
-function Install-StartupShortcut {
-  # ponytail: per-user Startup shortcut is enough; use Task Scheduler only if delayed/elevated startup is needed.
+function Get-StartupPowerShellPath {
+  return Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+}
+
+function Get-StartupArguments {
   $scriptPath = [System.IO.Path]::GetFullPath($PSCommandPath)
-  $scriptDir = Split-Path -Parent $scriptPath
-  $powerShellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-  $shortcutPath = Get-StartupShortcutPath
   $quotedScript = '"' + ($scriptPath -replace '"', '\"') + '"'
   $quotedCodexHome = '"' + ([System.IO.Path]::GetFullPath($CodexHome) -replace '"', '\"') + '"'
+  return "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $quotedScript -Command Start -UsagePollSeconds $UsagePollSeconds -PetPollMs $PetPollMs -HoverPaddingPx $HoverPaddingPx -CodexHome $quotedCodexHome"
+}
 
+function Get-StartupCommandLine {
+  $powerShellPath = Get-StartupPowerShellPath
+  return ('"{0}" {1}' -f $powerShellPath, (Get-StartupArguments))
+}
+
+function Get-StartupRegistryValue {
+  try {
+    return (Get-ItemProperty -Path $StartupRegistryPath -Name $StartupRegistryName -ErrorAction Stop).$StartupRegistryName
+  } catch {
+    return $null
+  }
+}
+
+function Install-StartupShortcut {
+  # ponytail: HKCU Run is enough; use Task Scheduler only if delayed/elevated startup is needed.
+  $scriptPath = [System.IO.Path]::GetFullPath($PSCommandPath)
+  $scriptDir = Split-Path -Parent $scriptPath
+  $powerShellPath = Get-StartupPowerShellPath
+  $arguments = Get-StartupArguments
+  $shortcutPath = Get-StartupShortcutPath
+
+  New-Item -Path $StartupRegistryPath -Force | Out-Null
+  New-ItemProperty -Path $StartupRegistryPath -Name $StartupRegistryName -Value (Get-StartupCommandLine) -PropertyType String -Force | Out-Null
+
+  # Keep the shortcut as a fallback for machines where users inspect Startup manually.
   $shell = New-Object -ComObject WScript.Shell
   $shortcut = $shell.CreateShortcut($shortcutPath)
   $shortcut.TargetPath = $powerShellPath
-  $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $quotedScript -Command Start -UsagePollSeconds $UsagePollSeconds -PetPollMs $PetPollMs -HoverPaddingPx $HoverPaddingPx -CodexHome $quotedCodexHome"
+  $shortcut.Arguments = $arguments
   $shortcut.WorkingDirectory = $scriptDir
   $shortcut.WindowStyle = 7
   $shortcut.Description = "Start Codex pet usage overlay"
   $shortcut.Save()
 
+  Write-Output ("Installed startup registry value: {0}\{1}" -f $StartupRegistryPath, $StartupRegistryName)
   Write-Output ("Installed startup shortcut: {0}" -f $shortcutPath)
 }
 
 function Uninstall-StartupShortcut {
   $shortcutPath = Get-StartupShortcutPath
+  if ($null -ne (Get-StartupRegistryValue)) {
+    Remove-ItemProperty -Path $StartupRegistryPath -Name $StartupRegistryName -Force
+    Write-Output ("Removed startup registry value: {0}\{1}" -f $StartupRegistryPath, $StartupRegistryName)
+  }
   if (Test-Path -LiteralPath $shortcutPath) {
     Remove-Item -LiteralPath $shortcutPath -Force
     Write-Output ("Removed startup shortcut: {0}" -f $shortcutPath)
@@ -302,7 +336,7 @@ function Get-LiveUsage {
   $payload = Invoke-RestMethod -Uri "https://chatgpt.com/backend-api/wham/usage" -Headers @{
     Authorization = "Bearer $token"
     Accept = "application/json"
-  } -TimeoutSec 5
+  } -TimeoutSec 20
   return Convert-UsagePayload -Payload $payload -Source "live"
 }
 
@@ -520,6 +554,8 @@ con.close()
   Assert-True ($dipPoint.X -eq 12 -and $dipPoint.Y -eq 34) "DPI conversion should safely fall back without a WPF source"
   $startupPath = Get-StartupShortcutPath
   Assert-True (([System.IO.Path]::GetExtension($startupPath)) -ieq ".lnk") "startup shortcut path should point to a lnk file"
+  $startupCommand = Get-StartupCommandLine
+  Assert-True ($startupCommand.IndexOf("-Command Start", [StringComparison]::OrdinalIgnoreCase) -ge 0) "startup command should call Start"
 
   Write-Output "SelfTest OK"
 }
@@ -528,6 +564,7 @@ function Show-Status {
   $running = Get-RunningOverlayProcess
   $state = Read-CodexState
   $startupPath = Get-StartupShortcutPath
+  $startupRegistryValue = Get-StartupRegistryValue
   $latestLog = ""
   if (Test-Path -LiteralPath $LogPath) {
     $latestLog = Get-Content -LiteralPath $LogPath -Tail 1
@@ -537,6 +574,9 @@ function Show-Status {
     ProcessId = if ($running) { $running.ProcessId } else { $null }
     PidFile = $PidPath
     LogFile = $LogPath
+    StartupEnabled = ($null -ne $startupRegistryValue) -or (Test-Path -LiteralPath $startupPath)
+    StartupRegistry = $null -ne $startupRegistryValue
+    StartupRegistryPath = "{0}\{1}" -f $StartupRegistryPath, $StartupRegistryName
     StartupShortcut = Test-Path -LiteralPath $startupPath
     StartupShortcutPath = $startupPath
     CodexHome = [System.IO.Path]::GetFullPath($CodexHome)

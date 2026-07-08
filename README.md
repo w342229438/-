@@ -51,7 +51,13 @@ powershell -ExecutionPolicy Bypass -File .\CodexPetUsageOverlay.ps1 Start -PetPo
 powershell -ExecutionPolicy Bypass -File .\CodexPetUsageOverlay.ps1 InstallStartup
 ```
 
-它会在当前用户的 Startup 文件夹创建快捷方式。下次重启登录 Windows 后，会自动执行 `Start`，不用再手动开启。
+它会写入当前用户的 Windows 登录启动项：
+
+```text
+HKCU\Software\Microsoft\Windows\CurrentVersion\Run\CodexPetUsageOverlay
+```
+
+同时会在当前用户的 Startup 文件夹创建一个快捷方式作为兼容 fallback。下次重启登录 Windows 后，会自动执行 `Start`，不用再手动开启。
 
 要取消自启：
 
@@ -59,7 +65,7 @@ powershell -ExecutionPolicy Bypass -File .\CodexPetUsageOverlay.ps1 InstallStart
 powershell -ExecutionPolicy Bypass -File .\CodexPetUsageOverlay.ps1 UninstallStartup
 ```
 
-`Status.bat` 会显示 `StartupShortcut` 和 `StartupShortcutPath`，用来确认自启是否已安装。
+`Status.bat` 会显示 `StartupEnabled`、`StartupRegistry`、`StartupShortcut`，用来确认自启是否已安装。
 
 ## 数据与隐私
 
@@ -89,7 +95,7 @@ https://chatgpt.com/backend-api/wham/usage
 ## 故障排查
 
 - 没看到悬浮层：确认 Codex Desktop 里已经打开 `/pet`，然后把鼠标移动到宠物身上。
-- 重启后没显示：先运行 `Status.bat`，确认 `StartupShortcut: True` 且 `Running: True`。
+- 重启后没显示：先运行 `Status.bat`，确认 `StartupEnabled: True` 且 `Running: True`。
 - 显示用量不可用：先运行 `Status.bat`，再看 `%LOCALAPPDATA%\CodexPetUsageOverlay\overlay.log`。
 - 重复启动：`Start` 会复用已运行实例，不会启动多个。
 - 要停掉当前进程：运行 `Stop.bat`。
@@ -99,4 +105,4 @@ https://chatgpt.com/backend-api/wham/usage
 
 - `wham/usage` 不是公开稳定 API，未来可能变化。
 - 本地日志兜底依赖 Codex 日志里出现 `codex.rate_limits` 事件；如果没有事件，会显示不可用。
-- 开机自启使用当前用户 Startup 快捷方式；如果需要延迟启动或管理员权限，再改 Task Scheduler。
+- 开机自启使用当前用户 `HKCU\...\Run`，并保留 Startup 快捷方式 fallback；如果需要延迟启动或管理员权限，再改 Task Scheduler。
