@@ -12,6 +12,7 @@ local timer = nil
 local lastSignature = nil
 local currentUsage = { available = false, source = "none", observedAt = os.time() }
 local lastUsageRead = 0
+local usageRefreshTimer = nil
 
 local function readFile(path)
   local f = io.open(path, "r")
@@ -212,6 +213,15 @@ local function readUsage(force)
     currentUsage = { available = false, source = "none", observedAt = now }
   end
   return currentUsage
+end
+
+local function refreshUsageLater()
+  if usageRefreshTimer or os.time() - lastUsageRead < 30 then return end
+
+  usageRefreshTimer = hs.timer.doAfter(0.25, function()
+    usageRefreshTimer = nil
+    readUsage(false)
+  end)
 end
 
 local function formatDuration(timestamp)
@@ -476,7 +486,8 @@ local function update()
   end
 
   if overPet and not hoverStartedAt then hoverStartedAt = os.time() end
-  local usage = readUsage(false)
+  local usage = currentUsage
+  refreshUsageLater()
 
   if hoverStartedAt and os.time() - hoverStartedAt >= hoverCardDelaySeconds then
     local cardFrame = cardFrameForPet(target)
@@ -501,6 +512,7 @@ end
 
 function M.stop()
   if timer then timer:stop(); timer = nil end
+  if usageRefreshTimer then usageRefreshTimer:stop(); usageRefreshTimer = nil end
   hideAll()
 end
 
