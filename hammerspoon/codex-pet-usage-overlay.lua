@@ -8,11 +8,19 @@ local logPaths = {
 }
 
 local canvases = {}
+local canvasStates = {}
 local timer = nil
-local lastSignature = nil
 local currentUsage = { available = false, source = "none", observedAt = os.time() }
 local lastUsageRead = 0
 local usageRefreshTimer = nil
+local cachedState = nil
+local hasCachedState = false
+local lastStateReadAt = 0
+
+local idlePollSeconds = 0.25
+local activePollSeconds = 0.1
+local idleStateReadSeconds = 0.5
+local activeStateReadSeconds = 0.25
 
 local function readFile(path)
   local f = io.open(path, "r")
@@ -35,6 +43,19 @@ local function readState()
   local ok, decoded = pcall(hs.json.decode, body)
   if ok then return decoded end
   return nil
+end
+
+local function readCachedState(active)
+  local now = hs.timer.secondsSinceEpoch()
+  local interval = active and activeStateReadSeconds or idleStateReadSeconds
+  if hasCachedState and now - lastStateReadAt < interval then
+    return cachedState
+  end
+
+  cachedState = readState()
+  hasCachedState = true
+  lastStateReadAt = now
+  return cachedState
 end
 
 local function shellQuote(value)
@@ -443,30 +464,53 @@ local function makeCardElements(usage)
   return elements
 end
 
-local function setCanvas(index, frame, elements)
+local function frameSignature(frame)
+  return string.format("%.0f,%.0f,%.0f,%.0f", frame.x, frame.y, frame.w, frame.h)
+end
+
+local function usageSignature(usage)
+  return table.concat({
+    tostring(usage.available),
+    tostring(usage.source),
+    tostring(usage.observedAt),
+    tostring(usage.primaryRemaining),
+    tostring(usage.secondaryRemaining),
+    tostring(usage.primaryResetAt),
+    tostring(usage.secondaryResetAt),
+  }, ":")
+end
+
+local function setCanvas(index, frame, elements, signature)
+  local state = canvasStates[index]
+  if state and state.visible and state.signature == signature then return end
+
   canvases[index] = canvases[index] or hs.canvas.new(frame)
   canvases[index]:frame(frame)
   canvases[index]:replaceElements(elements)
   canvases[index]:level(hs.canvas.windowLevels.screenSaver or hs.canvas.windowLevels.overlay)
   canvases[index]:behavior({ "canJoinAllSpaces", "stationary" })
   canvases[index]:show()
+  canvasStates[index] = { visible = true, signature = signature }
 end
 
 local function hideCanvas(index)
-  if canvases[index] then canvases[index]:hide() end
+  local state = canvasStates[index]
+  if canvases[index] and state and state.visible then canvases[index]:hide() end
+  if state then state.visible = false end
 end
 
 local function hideAll()
-  for _, c in pairs(canvases) do c:hide() end
+  for index in pairs(canvases) do hideCanvas(index) end
 end
 
 local function update()
-  local state = readState()
+  local active = hoverStartedAt ~= nil or visibleCardFrame ~= nil
+  local state = readCachedState(active)
   if not state or not state["electron-avatar-overlay-open"] then
     hoverStartedAt = nil
     visibleCardFrame = nil
     hideAll()
-    return
+    return idlePollSeconds
   end
 
   local target = targetFromBounds(state["electron-avatar-overlay-bounds"])
@@ -474,7 +518,7 @@ local function update()
     hoverStartedAt = nil
     visibleCardFrame = nil
     hideAll()
-    return
+    return idlePollSeconds
   end
 
   local interacting, overPet = mouseIsInInteractionRegion(target)
@@ -482,7 +526,7 @@ local function update()
     hoverStartedAt = nil
     visibleCardFrame = nil
     hideAll()
-    return
+    return idlePollSeconds
   end
 
   if overPet and not hoverStartedAt then hoverStartedAt = os.time() end
@@ -493,26 +537,38 @@ local function update()
     local cardFrame = cardFrameForPet(target)
     visibleCardFrame = cardFrame
     hideCanvas(1)
-    setCanvas(2, cardFrame, makeCardElements(usage))
+    setCanvas(2, cardFrame, makeCardElements(usage), "card:" .. frameSignature(cardFrame) .. ":" .. usageSignature(usage))
   else
     visibleCardFrame = nil
     local ringFrame = ringFrameForPet(target)
-    setCanvas(1, ringFrame, makeRingElements(usage, ringFrame.w))
+    setCanvas(1, ringFrame, makeRingElements(usage, ringFrame.w), "ring:" .. frameSignature(ringFrame) .. ":" .. usageSignature(usage))
     hideCanvas(2)
   end
+
+  return activePollSeconds
+end
+
+local function scheduleUpdate(delay)
+  if timer then timer:stop() end
+  timer = hs.timer.doAfter(delay, function()
+    timer = nil
+    scheduleUpdate(update())
+  end)
 end
 
 function M.start()
   if timer then timer:stop() end
   readUsage(true)
-  update()
-  timer = hs.timer.doEvery(0.1, update)
+  scheduleUpdate(update())
   hs.alert.show("Codex /pet 悬停圆环已启动", 2)
 end
 
 function M.stop()
   if timer then timer:stop(); timer = nil end
   if usageRefreshTimer then usageRefreshTimer:stop(); usageRefreshTimer = nil end
+  cachedState = nil
+  hasCachedState = false
+  lastStateReadAt = 0
   hideAll()
 end
 
