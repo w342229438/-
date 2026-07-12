@@ -1,8 +1,14 @@
 # Codex /pet 用量伴随层
 
-这是一个从零写的极简 Windows 伴随层，用来给 Codex Desktop 的 `/pet` 显示实时 Codex 剩余用量。
+这是一个从零写的极简伴随层，用来给 Codex Desktop 的 `/pet` 显示实时 Codex 剩余用量。
 
 它不修改 Codex，也不复制参考项目代码。它只读取本机 Codex 状态文件定位宠物，并使用本机 Codex 登录态查询用量。
+
+## 平台
+
+- Windows：使用仓库根目录的 `.bat` / `CodexPetUsageOverlay.ps1`。
+- macOS：使用 `macos/` 目录里的 Swift/AppKit 适配版，说明见 `macos/README-macOS.md`。
+- macOS Hammerspoon：使用 `hammerspoon/codex-pet-usage-overlay.lua`。这是本仓库当前推荐的 macOS 运行方式。
 
 ## 功能
 
@@ -13,6 +19,35 @@
 - 实时接口失败时，尝试读取本地 `logs_2.sqlite` / `logs_1.sqlite` 中的 `codex.rate_limits` 事件。
 - 支持当前用户开机自启。
 - 不做安装器、托盘、设置页、游戏化。
+
+## macOS Hammerspoon 版
+
+需要先安装并运行 [Hammerspoon](https://www.hammerspoon.org/)。将脚本复制到本机配置目录：
+
+```zsh
+mkdir -p ~/.hammerspoon
+cp hammerspoon/codex-pet-usage-overlay.lua ~/.hammerspoon/
+```
+
+然后在 `~/.hammerspoon/init.lua` 末尾加入：
+
+```lua
+local ok, err = pcall(require, "codex-pet-usage-overlay")
+if not ok then
+  hs.printf("Codex pet usage overlay failed: %s", tostring(err))
+end
+```
+
+在 Hammerspoon 菜单中选择 `Reload Config` 后，打开 Codex Desktop 的 `/pet`：
+
+- 鼠标悬停宠物时显示双层用量圆环；离开后隐藏。
+- 连续悬停 5 秒后显示用量卡片，可在宠物和卡片之间移动查看。
+- 外圈为 5 小时窗口，内圈为 7 天窗口。
+- 每 30 秒优先查询 OpenAI 的用量接口；网络失败时回退到本地 Codex 日志。
+
+脚本只从本机 `~/.codex/auth.json` 读取 access token，并只将它发送到
+`https://chatgpt.com/backend-api/wham/usage` 查询当前用量。不要将 `auth.json`、
+`.codex` 目录或任何数据库日志提交到仓库。
 
 ## 运行
 

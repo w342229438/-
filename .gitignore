@@ -2,4 +2,8 @@
 *.pid
 *.tmp
 *.sqlite
+.DS_Store
+auth.json
+.codex/
 __pycache__/
+macos/.build/
