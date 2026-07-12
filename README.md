@@ -4,6 +4,12 @@
 
 它不修改 Codex，也不复制参考项目代码。它只读取本机 Codex 状态文件定位宠物，并使用本机 Codex 登录态查询用量。
 
+## 原项目与署名
+
+本项目基于 [Jimmy-asks-AI/codex-pet-usage](https://github.com/Jimmy-asks-AI/codex-pet-usage) 的使用场景进行扩展，原项目作者为 [Jimmy-asks-AI](https://github.com/Jimmy-asks-AI)。
+
+当前仓库补充了 macOS Swift/AppKit 适配版、Hammerspoon 悬浮层，以及宠物悬停圆环和延迟用量卡片交互。
+
 ## 平台
 
 - Windows：使用仓库根目录的 `.bat` / `CodexPetUsageOverlay.ps1`。
@@ -13,6 +19,7 @@
 ## 功能
 
 - 鼠标移动到 Codex `/pet` 身上时显示透明悬浮层，并保持 10 秒。
+- 连续悬停宠物 3 秒后显示用量卡片，同时隐藏圆环；鼠标移开后自动收起。
 - 外圈显示 5 小时窗口剩余用量。
 - 内圈显示 7 天窗口剩余用量。
 - 中文显示剩余百分比和刷新倒计时。
