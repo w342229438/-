@@ -332,7 +332,7 @@ end
 
 local hoverStartedAt = nil
 local visibleCardFrame = nil
-local hoverCardDelaySeconds = 5
+local hoverCardDelaySeconds = 3
 
 local function ringFrameForPet(target)
   local pet = target.pet
@@ -477,15 +477,16 @@ local function update()
 
   if overPet and not hoverStartedAt then hoverStartedAt = os.time() end
   local usage = readUsage(false)
-  local ringFrame = ringFrameForPet(target)
-  setCanvas(1, ringFrame, makeRingElements(usage, ringFrame.w))
 
   if hoverStartedAt and os.time() - hoverStartedAt >= hoverCardDelaySeconds then
     local cardFrame = cardFrameForPet(target)
     visibleCardFrame = cardFrame
+    hideCanvas(1)
     setCanvas(2, cardFrame, makeCardElements(usage))
   else
     visibleCardFrame = nil
+    local ringFrame = ringFrameForPet(target)
+    setCanvas(1, ringFrame, makeRingElements(usage, ringFrame.w))
     hideCanvas(2)
   end
 end
