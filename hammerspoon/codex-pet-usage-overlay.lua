@@ -364,6 +364,8 @@ end
 local hoverStartedAt = nil
 local visibleCardFrame = nil
 local hoverCardDelaySeconds = 3
+local initialMousePosition = nil
+local awaitingInitialMouseMove = true
 
 local function ringFrameForPet(target)
   local pet = target.pet
@@ -392,11 +394,6 @@ local function cardFrameForPet(target)
   }
 end
 
-local function isPointInFrame(point, frame)
-  return frame and point.x >= frame.x and point.x <= frame.x + frame.w
-    and point.y >= frame.y and point.y <= frame.y + frame.h
-end
-
 local function mouseIsOverPet(target)
   local cursor = hs.mouse.absolutePosition()
   local pet = target.pet
@@ -406,18 +403,11 @@ local function mouseIsOverPet(target)
 end
 
 local function mouseIsInInteractionRegion(target)
-  if mouseIsOverPet(target) then return true, true end
-  if not visibleCardFrame then return false, false end
-
-  local pet = target.pet
-  local card = visibleCardFrame
-  local frame = {
-    x = math.min(pet.x, card.x) - 8,
-    y = math.min(pet.y, card.y) - 8,
-    w = math.max(pet.x + pet.w, card.x + card.w) - math.min(pet.x, card.x) + 16,
-    h = math.max(pet.y + pet.h, card.y + card.h) - math.min(pet.y, card.y) + 16,
-  }
-  return isPointInFrame(hs.mouse.absolutePosition(), frame), false
+  -- The card is an informational tooltip, not a separate hover target.
+  -- Restricting this to the pet avoids a stale card being held open by the
+  -- large rectangle between the pet and card after Codex restores its state.
+  local overPet = mouseIsOverPet(target)
+  return overPet, overPet
 end
 
 local function makeRingElements(usage, diameter)
@@ -504,6 +494,17 @@ local function hideAll()
 end
 
 local function update()
+  local cursor = hs.mouse.absolutePosition()
+  if awaitingInitialMouseMove then
+    if initialMousePosition
+      and cursor.x == initialMousePosition.x
+      and cursor.y == initialMousePosition.y then
+      hideAll()
+      return idlePollSeconds
+    end
+    awaitingInitialMouseMove = false
+  end
+
   local active = hoverStartedAt ~= nil or visibleCardFrame ~= nil
   local state = readCachedState(active)
   if not state or not state["electron-avatar-overlay-open"] then
@@ -558,6 +559,11 @@ end
 
 function M.start()
   if timer then timer:stop() end
+  hideAll()
+  hoverStartedAt = nil
+  visibleCardFrame = nil
+  initialMousePosition = hs.mouse.absolutePosition()
+  awaitingInitialMouseMove = true
   readUsage(true)
   scheduleUpdate(update())
   hs.alert.show("Codex /pet 悬停圆环已启动", 2)
@@ -569,6 +575,10 @@ function M.stop()
   cachedState = nil
   hasCachedState = false
   lastStateReadAt = 0
+  hoverStartedAt = nil
+  visibleCardFrame = nil
+  initialMousePosition = nil
+  awaitingInitialMouseMove = true
   hideAll()
 end
 
