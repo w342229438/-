@@ -364,8 +364,7 @@ end
 local hoverStartedAt = nil
 local visibleCardFrame = nil
 local hoverCardDelaySeconds = 3
-local initialMousePosition = nil
-local awaitingInitialMouseMove = true
+local startupHideUntil = 0
 
 local function ringFrameForPet(target)
   local pet = target.pet
@@ -494,15 +493,9 @@ local function hideAll()
 end
 
 local function update()
-  local cursor = hs.mouse.absolutePosition()
-  if awaitingInitialMouseMove then
-    if initialMousePosition
-      and cursor.x == initialMousePosition.x
-      and cursor.y == initialMousePosition.y then
-      hideAll()
-      return idlePollSeconds
-    end
-    awaitingInitialMouseMove = false
+  if hs.timer.secondsSinceEpoch() < startupHideUntil then
+    hideAll()
+    return idlePollSeconds
   end
 
   local active = hoverStartedAt ~= nil or visibleCardFrame ~= nil
@@ -562,8 +555,7 @@ function M.start()
   hideAll()
   hoverStartedAt = nil
   visibleCardFrame = nil
-  initialMousePosition = hs.mouse.absolutePosition()
-  awaitingInitialMouseMove = true
+  startupHideUntil = hs.timer.secondsSinceEpoch() + 0.5
   readUsage(true)
   scheduleUpdate(update())
   hs.alert.show("Codex /pet 悬停圆环已启动", 2)
@@ -577,8 +569,7 @@ function M.stop()
   lastStateReadAt = 0
   hoverStartedAt = nil
   visibleCardFrame = nil
-  initialMousePosition = nil
-  awaitingInitialMouseMove = true
+  startupHideUntil = 0
   hideAll()
 end
 
