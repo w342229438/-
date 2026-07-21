@@ -365,19 +365,19 @@ local function mascotForBounds(bounds, display)
       local mascot = candidate.mascot
       local key = tostring(displayId or "") .. ":" .. tostring(display.width) .. "x" .. tostring(display.height)
       lastKnownMascots[key] = mascot
-      return mascot
+      return mascot, false
     end
   end
 
   local key = tostring(displayId or "") .. ":" .. tostring(display.width) .. "x" .. tostring(display.height)
-  if lastKnownMascots[key] then return lastKnownMascots[key] end
-  return mascotDefaults[string.format("%dx%d", display.width or 0, display.height or 0)]
+  if lastKnownMascots[key] then return lastKnownMascots[key], false end
+  return mascotDefaults[string.format("%dx%d", display.width or 0, display.height or 0)], true
 end
 
 local function targetFromBounds(bounds)
   if type(bounds) ~= "table" then return nil end
   local display = bounds.displayBounds or { x = 0, y = 0, width = 1280, height = 720 }
-  local mascot = mascotForBounds(bounds, display)
+  local mascot, usingFallback = mascotForBounds(bounds, display)
   if not mascot then return nil end
   local screen = matchingScreenFrame(display)
   local petX = (bounds.x or 0) + (mascot.left or 0)
@@ -385,7 +385,7 @@ local function targetFromBounds(bounds)
   local localX = petX - (display.x or 0)
   local localY = petY - (display.y or 0)
 
-  return {
+  local target = {
     screen = screen,
     pet = {
       x = screen.x + localX,
@@ -394,6 +394,17 @@ local function targetFromBounds(bounds)
       h = mascot.height or 117,
     },
   }
+  if usingFallback then
+    -- Newer Codex state updates occasionally publish only the pet position.
+    -- Accept that coordinate form as well as the legacy tray-relative form.
+    target.alternatePet = {
+      x = screen.x + ((bounds.x or 0) - (display.x or 0)),
+      y = screen.y + ((bounds.y or 0) - (display.y or 0)),
+      w = mascot.width or 108,
+      h = mascot.height or 117,
+    }
+  end
+  return target
 end
 
 local hoverStartedAt = nil
@@ -430,18 +441,24 @@ end
 
 local function mouseIsOverPet(target)
   local cursor = hs.mouse.absolutePosition()
-  local pet = target.pet
-  local padding = 4
-  return cursor.x >= pet.x - padding and cursor.x <= pet.x + pet.w + padding
-    and cursor.y >= pet.y - padding and cursor.y <= pet.y + pet.h + padding
+  -- Partial Codex updates omit the mascot bounds. Keep a small tolerance
+  -- around the inferred position so a changed pet sprite still activates.
+  local padding = target.alternatePet and 48 or 4
+  for _, pet in ipairs({ target.pet, target.alternatePet }) do
+    if pet and cursor.x >= pet.x - padding and cursor.x <= pet.x + pet.w + padding
+      and cursor.y >= pet.y - padding and cursor.y <= pet.y + pet.h + padding then
+      return pet
+    end
+  end
+  return nil
 end
 
 local function mouseIsInInteractionRegion(target)
   -- The card is an informational tooltip, not a separate hover target.
   -- Restricting this to the pet avoids a stale card being held open by the
   -- large rectangle between the pet and card after Codex restores its state.
-  local overPet = mouseIsOverPet(target)
-  return overPet, overPet
+  local pet = mouseIsOverPet(target)
+  return pet ~= nil, pet
 end
 
 local function makeRingElements(usage, diameter)
@@ -558,7 +575,7 @@ local function update()
     return idlePollSeconds
   end
 
-  local interacting, overPet = mouseIsInInteractionRegion(target)
+  local interacting, hoveredPet = mouseIsInInteractionRegion(target)
   if not interacting then
     hoverStartedAt = nil
     visibleCardFrame = nil
@@ -566,7 +583,8 @@ local function update()
     return idlePollSeconds
   end
 
-  if overPet and not hoverStartedAt then hoverStartedAt = os.time() end
+  target.pet = hoveredPet
+  if hoveredPet and not hoverStartedAt then hoverStartedAt = os.time() end
   local usage = currentUsage
   refreshUsageLater()
 
