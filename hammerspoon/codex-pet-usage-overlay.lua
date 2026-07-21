@@ -10,6 +10,7 @@ local logPaths = {
 local canvases = {}
 local canvasStates = {}
 local timer = nil
+local screenWatcher = nil
 local currentUsage = { available = false, source = "none", observedAt = os.time() }
 local lastUsageRead = 0
 local usageRefreshTimer = nil
@@ -492,6 +493,14 @@ local function hideAll()
   for index in pairs(canvases) do hideCanvas(index) end
 end
 
+local function discardCanvases()
+  for _, canvas in pairs(canvases) do
+    pcall(function() canvas:delete() end)
+  end
+  canvases = {}
+  canvasStates = {}
+end
+
 local function update()
   if hs.timer.secondsSinceEpoch() < startupHideUntil then
     hideAll()
@@ -552,10 +561,19 @@ end
 
 function M.start()
   if timer then timer:stop() end
+  if screenWatcher then screenWatcher:stop() end
   hideAll()
   hoverStartedAt = nil
   visibleCardFrame = nil
   startupHideUntil = hs.timer.secondsSinceEpoch() + 0.5
+  screenWatcher = hs.screen.watcher.new(function()
+    -- Canvas windows can become orphaned when macOS rearranges displays.
+    -- Recreate them lazily against the new screen geometry on the next tick.
+    hoverStartedAt = nil
+    visibleCardFrame = nil
+    discardCanvases()
+  end)
+  screenWatcher:start()
   readUsage(true)
   scheduleUpdate(update())
   hs.alert.show("Codex /pet 悬停圆环已启动", 2)
@@ -564,6 +582,7 @@ end
 function M.stop()
   if timer then timer:stop(); timer = nil end
   if usageRefreshTimer then usageRefreshTimer:stop(); usageRefreshTimer = nil end
+  if screenWatcher then screenWatcher:stop(); screenWatcher = nil end
   cachedState = nil
   hasCachedState = false
   lastStateReadAt = 0
@@ -571,6 +590,7 @@ function M.stop()
   visibleCardFrame = nil
   startupHideUntil = 0
   hideAll()
+  discardCanvases()
 end
 
 M.start()
