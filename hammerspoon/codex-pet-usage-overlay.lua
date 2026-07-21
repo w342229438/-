@@ -340,11 +340,45 @@ local function makeRingElements(usage, diameter)
   }
 end
 
-local function targetFromBounds(bounds)
-  if type(bounds) ~= "table" or type(bounds.mascot) ~= "table" then return nil end
+local mascotDefaults = {
+  ["1080x1920"] = { left = 220, top = 160, width = 108, height = 117 },
+  ["1920x1080"] = { left = 220, top = 195, width = 108, height = 117 },
+}
+local lastKnownMascots = {}
 
-  local mascot = bounds.mascot
+local function mascotForBounds(bounds, display)
+  local candidates = {}
+  if type(bounds.mascot) == "table" then table.insert(candidates, { mascot = bounds.mascot }) end
+  local byDisplay = type(bounds.byDisplayId) == "table" and bounds.byDisplayId
+  local displayId = bounds.displayId
+  if byDisplay and displayId ~= nil then
+    if type(byDisplay[displayId]) == "table" then table.insert(candidates, byDisplay[displayId]) end
+    if type(byDisplay[tostring(displayId)]) == "table" then table.insert(candidates, byDisplay[tostring(displayId)]) end
+  end
+  if type(bounds.byResolution) == "table" then
+    local byResolution = bounds.byResolution[string.format("%dx%d", display.width or 0, display.height or 0)]
+    if type(byResolution) == "table" then table.insert(candidates, byResolution) end
+  end
+
+  for _, candidate in ipairs(candidates) do
+    if type(candidate) == "table" and type(candidate.mascot) == "table" then
+      local mascot = candidate.mascot
+      local key = tostring(displayId or "") .. ":" .. tostring(display.width) .. "x" .. tostring(display.height)
+      lastKnownMascots[key] = mascot
+      return mascot
+    end
+  end
+
+  local key = tostring(displayId or "") .. ":" .. tostring(display.width) .. "x" .. tostring(display.height)
+  if lastKnownMascots[key] then return lastKnownMascots[key] end
+  return mascotDefaults[string.format("%dx%d", display.width or 0, display.height or 0)]
+end
+
+local function targetFromBounds(bounds)
+  if type(bounds) ~= "table" then return nil end
   local display = bounds.displayBounds or { x = 0, y = 0, width = 1280, height = 720 }
+  local mascot = mascotForBounds(bounds, display)
+  if not mascot then return nil end
   local screen = matchingScreenFrame(display)
   local petX = (bounds.x or 0) + (mascot.left or 0)
   local petY = (bounds.y or 0) + (mascot.top or 0)
