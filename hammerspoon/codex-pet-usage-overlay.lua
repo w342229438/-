@@ -22,6 +22,7 @@ local idlePollSeconds = 0.25
 local activePollSeconds = 0.1
 local idleStateReadSeconds = 0.5
 local activeStateReadSeconds = 0.25
+local usageRefreshSeconds = 15
 
 local function readFile(path)
   local f = io.open(path, "r")
@@ -151,6 +152,10 @@ local function bucketResetAt(bucket)
   return nil
 end
 
+local function bucketWindowSeconds(bucket)
+  return type(bucket) == "table" and tonumber(bucket.limit_window_seconds or bucket.window_seconds) or nil
+end
+
 local function convertUsage(payload)
   local rate = payload and (payload.rate_limits or payload.rate_limit)
   if type(rate) ~= "table" then return nil end
@@ -170,6 +175,8 @@ local function convertUsage(payload)
     secondaryRemaining = secondaryRemaining,
     primaryResetAt = bucketResetAt(primary),
     secondaryResetAt = bucketResetAt(secondary),
+    primaryWindowSeconds = bucketWindowSeconds(primary),
+    secondaryWindowSeconds = bucketWindowSeconds(secondary),
   }
 end
 
@@ -198,7 +205,7 @@ end
 
 local function readUsage(force)
   local now = os.time()
-  if not force and now - lastUsageRead < 30 then
+  if not force and now - lastUsageRead < usageRefreshSeconds then
     return currentUsage
   end
 
@@ -238,7 +245,7 @@ local function readUsage(force)
 end
 
 local function refreshUsageLater()
-  if usageRefreshTimer or os.time() - lastUsageRead < 30 then return end
+  if usageRefreshTimer or os.time() - lastUsageRead < usageRefreshSeconds then return end
 
   usageRefreshTimer = hs.timer.doAfter(0.25, function()
     usageRefreshTimer = nil
@@ -292,7 +299,6 @@ end
 local function makeRingElements(usage, diameter)
   local center = { x = diameter / 2, y = diameter / 2 }
   local primary = usage.primaryRemaining or 0
-  local secondary = usage.secondaryRemaining or 0
 
   local function arc(radius, percent, color)
     return {
@@ -475,13 +481,25 @@ local function makeRingElements(usage, diameter)
     }
   end
 
-  return {
+  local elements = {
     { type = "circle", action = "stroke", center = center, radius = diameter / 2 - 5, strokeWidth = 2, strokeColor = { red = 0.12, green = 0.16, blue = 0.20, alpha = 0.58 } },
     { type = "circle", action = "stroke", center = center, radius = diameter / 2 - 10, strokeWidth = 7, strokeColor = { red = 0.22, green = 0.27, blue = 0.31, alpha = 0.62 } },
     arc(diameter / 2 - 10, primary, { red = 0.28, green = 1, blue = 0.72, alpha = 0.98 }),
-    { type = "circle", action = "stroke", center = center, radius = diameter / 2 - 21, strokeWidth = 7, strokeColor = { red = 0.22, green = 0.27, blue = 0.31, alpha = 0.62 } },
-    arc(diameter / 2 - 21, secondary, { red = 0.22, green = 0.58, blue = 1, alpha = 0.98 }),
   }
+  if usage.secondaryRemaining ~= nil then
+    table.insert(elements, { type = "circle", action = "stroke", center = center, radius = diameter / 2 - 21, strokeWidth = 7, strokeColor = { red = 0.22, green = 0.27, blue = 0.31, alpha = 0.62 } })
+    table.insert(elements, arc(diameter / 2 - 21, usage.secondaryRemaining, { red = 0.22, green = 0.58, blue = 1, alpha = 0.98 }))
+  end
+  return elements
+end
+
+local function windowLabel(seconds, fallback)
+  local value = tonumber(seconds)
+  if not value or value <= 0 then return fallback end
+  if value >= 6 * 86400 then return "7天" end
+  if value >= 86400 then return string.format("%d天", math.floor(value / 86400 + 0.5)) end
+  if value >= 3600 then return string.format("%d小时", math.floor(value / 3600 + 0.5)) end
+  return string.format("%d分钟", math.max(1, math.floor(value / 60 + 0.5)))
 end
 
 local function addUsageBar(elements, label, percent, resetAt, y, color)
@@ -500,8 +518,12 @@ local function makeCardElements(usage)
     { type = "text", text = "Codex /pet 用量", textSize = 17, textColor = { red = 1, green = 1, blue = 1, alpha = 1 }, frame = { x = 18, y = 10, w = 190, h = 24 } },
     { type = "text", text = source, textSize = 11, textAlignment = "right", textColor = { red = 0.72, green = 0.82, blue = 0.86, alpha = 0.95 }, frame = { x = 160, y = 13, w = 154, h = 18 } },
   }
-  addUsageBar(elements, "5小时", usage.primaryRemaining, usage.primaryResetAt, 38, { red = 0.28, green = 1, blue = 0.72, alpha = 0.95 })
-  addUsageBar(elements, "7天", usage.secondaryRemaining, usage.secondaryResetAt, 76, { red = 0.22, green = 0.58, blue = 1, alpha = 0.95 })
+  addUsageBar(elements, windowLabel(usage.primaryWindowSeconds, "5小时"), usage.primaryRemaining, usage.primaryResetAt, 38, { red = 0.28, green = 1, blue = 0.72, alpha = 0.95 })
+  if usage.secondaryRemaining ~= nil then
+    addUsageBar(elements, windowLabel(usage.secondaryWindowSeconds, "7天"), usage.secondaryRemaining, usage.secondaryResetAt, 76, { red = 0.22, green = 0.58, blue = 1, alpha = 0.95 })
+  else
+    table.insert(elements, { type = "text", text = "当前账户仅返回一个用量窗口", textSize = 11, textColor = { red = 0.72, green = 0.82, blue = 0.86, alpha = 0.9 }, frame = { x = 18, y = 80, w = 296, h = 18 } })
+  end
   return elements
 end
 
@@ -518,6 +540,8 @@ local function usageSignature(usage)
     tostring(usage.secondaryRemaining),
     tostring(usage.primaryResetAt),
     tostring(usage.secondaryResetAt),
+    tostring(usage.primaryWindowSeconds),
+    tostring(usage.secondaryWindowSeconds),
   }, ":")
 end
 
