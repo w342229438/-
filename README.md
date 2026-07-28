@@ -4,6 +4,20 @@
 
 它不修改 Codex，也不复制参考项目代码。它只读取本机 Codex 状态文件定位宠物，并使用本机 Codex 登录态查询用量。
 
+## 效果预览
+
+### 悬停显示额度圆环
+
+鼠标移动到 Codex `/pet` 宠物上时，立即显示当前额度进度。
+
+![悬停宠物显示 Codex 用量进度圆环](docs/images/pet-usage-ring.png)
+
+### 悬停 3 秒显示用量卡片
+
+保持悬停 3 秒后，圆环自动隐藏并显示剩余额度、刷新时间和数据状态。
+
+![悬停三秒显示 Codex 用量详情卡片](docs/images/pet-usage-card.png)
+
 ## 原项目与署名
 
 本项目基于 [Jimmy-asks-AI/codex-pet-usage](https://github.com/Jimmy-asks-AI/codex-pet-usage) 的使用场景进行扩展，原项目作者为 [Jimmy-asks-AI](https://github.com/Jimmy-asks-AI)。
