@@ -269,8 +269,14 @@ local function formatDuration(timestamp)
   return string.format("%d秒", seconds)
 end
 
-local function matchingScreenFrame(display)
+local function matchingScreenFrame(display, displayId)
   if not display then return nil end
+  local numericDisplayId = tonumber(displayId)
+  if numericDisplayId then
+    for _, s in ipairs(hs.screen.allScreens()) do
+      if tonumber(s:id()) == numericDisplayId then return s:fullFrame() end
+    end
+  end
   for _, s in ipairs(hs.screen.allScreens()) do
     local f = s:fullFrame()
     if math.abs(f.x - (display.x or 0)) < 8
@@ -296,15 +302,13 @@ local function clamp(v, lo, hi)
   return v
 end
 
-local mascotDefaults = {
-  ["1080x1920"] = { left = 220, top = 160, width = 108, height = 117 },
-  ["1920x1080"] = { left = 220, top = 195, width = 108, height = 117 },
+local mascotSizes = {
+  ["1080x1920"] = { width = 108, height = 117 },
+  ["1920x1080"] = { width = 108, height = 117 },
 }
-local lastKnownMascots = {}
 
-local function mascotForBounds(bounds, display)
-  local candidates = {}
-  if type(bounds.mascot) == "table" then table.insert(candidates, { mascot = bounds.mascot }) end
+local function boundsCandidates(bounds, display)
+  local candidates = { bounds }
   local byDisplay = type(bounds.byDisplayId) == "table" and bounds.byDisplayId
   local displayId = bounds.displayId
   if byDisplay and displayId ~= nil then
@@ -315,52 +319,68 @@ local function mascotForBounds(bounds, display)
     local byResolution = bounds.byResolution[string.format("%dx%d", display.width or 0, display.height or 0)]
     if type(byResolution) == "table" then table.insert(candidates, byResolution) end
   end
+  return candidates
+end
 
+local function petGeometryForBounds(bounds, display)
+  local candidates = boundsCandidates(bounds, display)
   for _, candidate in ipairs(candidates) do
-    if type(candidate) == "table" and type(candidate.mascot) == "table" then
+    if type(candidate) == "table" and type(candidate.anchor) == "table" then
+      local anchor = candidate.anchor
+      if tonumber(anchor.x) and tonumber(anchor.y) then
+        return {
+          x = anchor.x,
+          y = anchor.y,
+          w = anchor.width or 108,
+          h = anchor.height or 117,
+        }
+      end
+    end
+    if type(candidate) == "table" and type(candidate.mascot) == "table"
+      and tonumber(candidate.x) and tonumber(candidate.y) then
       local mascot = candidate.mascot
-      local key = tostring(displayId or "") .. ":" .. tostring(display.width) .. "x" .. tostring(display.height)
-      lastKnownMascots[key] = mascot
-      return mascot, false
+      return {
+        x = candidate.x + (mascot.left or 0),
+        y = candidate.y + (mascot.top or 0),
+        w = mascot.width or 108,
+        h = mascot.height or 117,
+      }
     end
   end
 
-  local key = tostring(displayId or "") .. ":" .. tostring(display.width) .. "x" .. tostring(display.height)
-  if lastKnownMascots[key] then return lastKnownMascots[key], false end
-  return mascotDefaults[string.format("%dx%d", display.width or 0, display.height or 0)], true
+  -- Current Codex versions may publish only x/y. In that format those values
+  -- are already the pet's top-left position, not the legacy tray origin.
+  if tonumber(bounds.x) and tonumber(bounds.y) then
+    local size = mascotSizes[string.format("%dx%d", display.width or 0, display.height or 0)]
+      or { width = 108, height = 117 }
+    return {
+      x = bounds.x,
+      y = bounds.y,
+      w = size.width,
+      h = size.height,
+    }
+  end
+  return nil
 end
 
 local function targetFromBounds(bounds)
   if type(bounds) ~= "table" then return nil end
   local display = bounds.displayBounds or { x = 0, y = 0, width = 1280, height = 720 }
-  local mascot, usingFallback = mascotForBounds(bounds, display)
-  if not mascot then return nil end
-  local screen = matchingScreenFrame(display)
-  local petX = (bounds.x or 0) + (mascot.left or 0)
-  local petY = (bounds.y or 0) + (mascot.top or 0)
-  local localX = petX - (display.x or 0)
-  local localY = petY - (display.y or 0)
+  local geometry = petGeometryForBounds(bounds, display)
+  if not geometry then return nil end
+  local screen = matchingScreenFrame(display, bounds.displayId)
+  local localX = geometry.x - (display.x or 0)
+  local localY = geometry.y - (display.y or 0)
 
-  local target = {
+  return {
     screen = screen,
     pet = {
       x = screen.x + localX,
       y = screen.y + localY,
-      w = mascot.width or 108,
-      h = mascot.height or 117,
+      w = geometry.w,
+      h = geometry.h,
     },
   }
-  if usingFallback then
-    -- Newer Codex state updates occasionally publish only the pet position.
-    -- Accept that coordinate form as well as the legacy tray-relative form.
-    target.alternatePet = {
-      x = screen.x + ((bounds.x or 0) - (display.x or 0)),
-      y = screen.y + ((bounds.y or 0) - (display.y or 0)),
-      w = mascot.width or 108,
-      h = mascot.height or 117,
-    }
-  end
-  return target
 end
 
 local hoverStartedAt = nil
@@ -397,14 +417,11 @@ end
 
 local function mouseIsOverPet(target)
   local cursor = hs.mouse.absolutePosition()
-  -- Partial Codex updates omit the mascot bounds. Keep a small tolerance
-  -- around the inferred position so a changed pet sprite still activates.
-  local padding = target.alternatePet and 48 or 4
-  for _, pet in ipairs({ target.pet, target.alternatePet }) do
-    if pet and cursor.x >= pet.x - padding and cursor.x <= pet.x + pet.w + padding
-      and cursor.y >= pet.y - padding and cursor.y <= pet.y + pet.h + padding then
-      return pet
-    end
+  local pet = target.pet
+  local padding = 8
+  if cursor.x >= pet.x - padding and cursor.x <= pet.x + pet.w + padding
+    and cursor.y >= pet.y - padding and cursor.y <= pet.y + pet.h + padding then
+    return pet
   end
   return nil
 end

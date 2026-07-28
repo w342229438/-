@@ -9,7 +9,7 @@ The package installs the overlay script without replacing the user's existing
 ```zsh
 cd macos/pkg
 chmod +x build-unsigned-pkg.sh scripts/postinstall resources/Uninstall.command
-./build-unsigned-pkg.sh 1.1.6
+./build-unsigned-pkg.sh 1.1.7
 ```
 
 The output is placed in `macos/pkg/dist/`.
