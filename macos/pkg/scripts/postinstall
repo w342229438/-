@@ -4,6 +4,8 @@ set -euo pipefail
 APP_DIR="/Applications/Codex Pet Usage Overlay"
 MARKER_BEGIN="-- BEGIN CODEX PET USAGE OVERLAY"
 MARKER_END="-- END CODEX PET USAGE OVERLAY"
+MODULE_NAME="codex-pet-usage-overlay"
+SCRIPT_PATH="$0"
 
 log() {
   print "CodexPetUsageOverlay installer: $*"
@@ -17,7 +19,7 @@ extract_payload() {
     $0 == begin { copying = 1; next }
     $0 == end { exit }
     copying { print }
-  ' "$0" | /usr/bin/base64 -D
+  ' "$SCRIPT_PATH" | /usr/bin/base64 -D
 }
 
 install_hammerspoon_if_needed() {
@@ -80,7 +82,7 @@ if [[ ! -e "$init_file" ]]; then
   install -m 644 -o "$console_user" -g "$user_group" /dev/null "$init_file"
 fi
 
-if grep -Fq "$MARKER_BEGIN" "$init_file"; then
+if grep -Fq -- "$MARKER_BEGIN" "$init_file"; then
   temporary_file="$(mktemp "$config_dir/init.lua.XXXXXX")"
   awk -v begin="$MARKER_BEGIN" -v end="$MARKER_END" '
     $0 == begin { skipping = 1; next }
@@ -90,15 +92,19 @@ if grep -Fq "$MARKER_BEGIN" "$init_file"; then
   mv "$temporary_file" "$init_file"
 fi
 
-{
-  print ""
-  print "$MARKER_BEGIN"
-  print 'local ok, err = pcall(require, "codex-pet-usage-overlay")'
-  print "if not ok then"
-  print '  hs.printf("Codex pet usage overlay failed: %s", tostring(err))'
-  print "end"
-  print "$MARKER_END"
-} >> "$init_file"
+if grep -Fq -- "$MODULE_NAME" "$init_file"; then
+  log "Using existing Hammerspoon load configuration."
+else
+  {
+    print ""
+    print -r -- "$MARKER_BEGIN"
+    print 'local ok, err = pcall(require, "codex-pet-usage-overlay")'
+    print "if not ok then"
+    print '  hs.printf("Codex pet usage overlay failed: %s", tostring(err))'
+    print "end"
+    print -r -- "$MARKER_END"
+  } >> "$init_file"
+fi
 
 chown "$console_user:$user_group" "$init_file"
 chmod 644 "$init_file"

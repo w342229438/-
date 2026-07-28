@@ -17,7 +17,7 @@ if [[ -n "$console_user" && "$console_user" != "root" && "$console_user" != "log
   init_file="$config_dir/init.lua"
 
   rm -f "$config_dir/codex-pet-usage-overlay.lua"
-  if [[ -f "$init_file" ]] && grep -Fq "$MARKER_BEGIN" "$init_file"; then
+  if [[ -f "$init_file" ]] && grep -Fq -- "$MARKER_BEGIN" "$init_file"; then
     temporary_file="$(mktemp "$config_dir/init.lua.XXXXXX")"
     awk -v begin="$MARKER_BEGIN" -v end="$MARKER_END" '
       $0 == begin { skipping = 1; next }
