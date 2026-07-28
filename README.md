@@ -25,7 +25,7 @@
 - 中文显示剩余百分比和刷新倒计时。
 - 实时接口失败时，尝试读取本地 `logs_2.sqlite` / `logs_1.sqlite` 中的 `codex.rate_limits` 事件。
 - 支持当前用户开机自启。
-- 不做安装器、托盘、设置页、游戏化。
+- 提供未签名的 macOS `.pkg` 安装包构建脚本。
 
 ## macOS Hammerspoon 版
 
@@ -55,6 +55,41 @@ end
 脚本只从本机 `~/.codex/auth.json` 读取 access token，并只将它发送到
 `https://chatgpt.com/backend-api/wham/usage` 查询当前用量。不要将 `auth.json`、
 `.codex` 目录或任何数据库日志提交到仓库。
+
+## macOS 未签名安装包
+
+仓库提供 Hammerspoon 版的未签名 `.pkg` 构建脚本。目标 Mac 需要先安装
+[Hammerspoon](https://www.hammerspoon.org/)。构建并生成安装包：
+
+```zsh
+cd macos/pkg
+chmod +x build-unsigned-pkg.sh scripts/postinstall resources/Uninstall.command
+./build-unsigned-pkg.sh 1.0.0
+```
+
+安装包位于 `macos/pkg/dist/`。它只会安装本项目的 Lua 脚本，并在现有
+`~/.hammerspoon/init.lua` 末尾增加一个带标记的加载块，不会覆盖已有配置。
+因为包未签名，其他 Mac 首次安装时可能需要按住 Control 点击安装包，再选择“打开”。
+卸载入口为：
+
+```text
+/Applications/Codex Pet Usage Overlay/Uninstall.command
+```
+
+### 使用发布版安装
+
+1. 从 [GitHub Releases](https://github.com/w342229438/-/releases/latest) 下载 `CodexPetUsageOverlay-*-unsigned.pkg`。
+2. 确认 Hammerspoon 已安装到 `/Applications/Hammerspoon.app`。首次使用时，按 Hammerspoon 的提示授予所需的 macOS 权限。
+3. 双击 `.pkg` 并完成系统安装流程。若 macOS 阻止打开，按住 Control 点击安装包，再选择“打开”。
+4. 安装器会打开 Hammerspoon。随后打开 Codex Desktop 的 `/pet`，鼠标移到宠物上即可看到圆环；连续悬停 3 秒显示用量卡片。
+
+安装器只写入 `~/.hammerspoon/codex-pet-usage-overlay.lua`，并在 `init.lua` 增加一个带标记的加载块。它不会修改 Codex 本体，也不会覆盖其他 Hammerspoon 配置。
+
+要移除功能，运行：
+
+```text
+/Applications/Codex Pet Usage Overlay/Uninstall.command
+```
 
 ## 运行
 

@@ -7,3 +7,5 @@ auth.json
 .codex/
 __pycache__/
 macos/.build/
+macos/pkg/build/
+macos/pkg/dist/

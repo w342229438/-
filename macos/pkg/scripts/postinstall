@@ -1,0 +1,81 @@
+#!/bin/zsh
+set -euo pipefail
+
+APP_DIR="/Applications/Codex Pet Usage Overlay"
+MARKER_BEGIN="-- BEGIN CODEX PET USAGE OVERLAY"
+MARKER_END="-- END CODEX PET USAGE OVERLAY"
+
+log() {
+  print "CodexPetUsageOverlay installer: $*"
+}
+
+extract_payload() {
+  local name="$1"
+  local begin="__CODEX_PET_USAGE_${name}_START__"
+  local end="__CODEX_PET_USAGE_${name}_END__"
+  awk -v begin="$begin" -v end="$end" '
+    $0 == begin { copying = 1; next }
+    $0 == end { exit }
+    copying { print }
+  ' "$0" | /usr/bin/base64 -D
+}
+
+console_user="$(stat -f '%Su' /dev/console)"
+if [[ -z "$console_user" || "$console_user" == "root" || "$console_user" == "loginwindow" ]]; then
+  log "No logged-in user found. Open the installer again after signing in."
+  exit 0
+fi
+
+user_home="$(dscl . -read "/Users/$console_user" NFSHomeDirectory | awk '{print $2}')"
+user_uid="$(id -u "$console_user")"
+user_group="$(id -gn "$console_user")"
+config_dir="$user_home/.hammerspoon"
+target="$config_dir/codex-pet-usage-overlay.lua"
+init_file="$config_dir/init.lua"
+
+install -d -m 755 -o "$console_user" -g "$user_group" "$config_dir"
+extract_payload "OVERLAY" > "$target"
+chown "$console_user:$user_group" "$target"
+chmod 644 "$target"
+
+install -d -m 755 "$APP_DIR"
+extract_payload "UNINSTALL" > "$APP_DIR/Uninstall.command"
+extract_payload "README" > "$APP_DIR/README.txt"
+chmod 755 "$APP_DIR/Uninstall.command"
+chmod 644 "$APP_DIR/README.txt"
+
+if [[ ! -e "$init_file" ]]; then
+  install -m 644 -o "$console_user" -g "$user_group" /dev/null "$init_file"
+fi
+
+if grep -Fq "$MARKER_BEGIN" "$init_file"; then
+  temporary_file="$(mktemp "$config_dir/init.lua.XXXXXX")"
+  awk -v begin="$MARKER_BEGIN" -v end="$MARKER_END" '
+    $0 == begin { skipping = 1; next }
+    $0 == end { skipping = 0; next }
+    !skipping { print }
+  ' "$init_file" > "$temporary_file"
+  mv "$temporary_file" "$init_file"
+fi
+
+{
+  print ""
+  print "$MARKER_BEGIN"
+  print 'local ok, err = pcall(require, "codex-pet-usage-overlay")'
+  print "if not ok then"
+  print '  hs.printf("Codex pet usage overlay failed: %s", tostring(err))'
+  print "end"
+  print "$MARKER_END"
+} >> "$init_file"
+
+chown "$console_user:$user_group" "$init_file"
+chmod 644 "$init_file"
+
+if [[ -d "/Applications/Hammerspoon.app" ]]; then
+  launchctl asuser "$user_uid" /usr/bin/open -a Hammerspoon || true
+  log "Installed overlay for $console_user and opened Hammerspoon."
+else
+  log "Installed overlay for $console_user. Install Hammerspoon, then open it once to load the overlay."
+fi
+
+exit 0
