@@ -321,14 +321,6 @@ local function makeRingElements(usage, diameter)
       type = "circle",
       action = "stroke",
       center = center,
-      radius = diameter / 2 - 5,
-      strokeWidth = 2,
-      strokeColor = { red = 0.12, green = 0.16, blue = 0.20, alpha = 0.58 },
-    },
-    {
-      type = "circle",
-      action = "stroke",
-      center = center,
       radius = diameter / 2 - 10,
       strokeWidth = 7,
       strokeColor = { red = 0.22, green = 0.27, blue = 0.31, alpha = 0.62 },
@@ -482,7 +474,6 @@ local function makeRingElements(usage, diameter)
   end
 
   local elements = {
-    { type = "circle", action = "stroke", center = center, radius = diameter / 2 - 5, strokeWidth = 2, strokeColor = { red = 0.12, green = 0.16, blue = 0.20, alpha = 0.58 } },
     { type = "circle", action = "stroke", center = center, radius = diameter / 2 - 10, strokeWidth = 7, strokeColor = { red = 0.22, green = 0.27, blue = 0.31, alpha = 0.62 } },
     arc(diameter / 2 - 10, primary, { red = 0.28, green = 1, blue = 0.72, alpha = 0.98 }),
   }
