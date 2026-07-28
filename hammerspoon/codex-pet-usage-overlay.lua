@@ -296,48 +296,6 @@ local function clamp(v, lo, hi)
   return v
 end
 
-local function makeRingElements(usage, diameter)
-  local center = { x = diameter / 2, y = diameter / 2 }
-  local primary = usage.primaryRemaining or 0
-
-  local function arc(radius, percent, color)
-    return {
-      type = "arc",
-      action = "stroke",
-      center = center,
-      radius = radius,
-      startAngle = -90,
-      endAngle = -90 + 360 * percent / 100,
-      arcRadii = false,
-      arcClockwise = true,
-      strokeWidth = 7,
-      strokeCapStyle = "round",
-      strokeColor = color,
-    }
-  end
-
-  return {
-    {
-      type = "circle",
-      action = "stroke",
-      center = center,
-      radius = diameter / 2 - 10,
-      strokeWidth = 7,
-      strokeColor = { red = 0.22, green = 0.27, blue = 0.31, alpha = 0.62 },
-    },
-    arc(diameter / 2 - 10, primary, { red = 0.28, green = 1, blue = 0.72, alpha = 0.98 }),
-    {
-      type = "circle",
-      action = "stroke",
-      center = center,
-      radius = diameter / 2 - 21,
-      strokeWidth = 7,
-      strokeColor = { red = 0.22, green = 0.27, blue = 0.31, alpha = 0.62 },
-    },
-    arc(diameter / 2 - 21, secondary, { red = 0.22, green = 0.58, blue = 1, alpha = 0.98 }),
-  }
-end
-
 local mascotDefaults = {
   ["1080x1920"] = { left = 220, top = 160, width = 108, height = 117 },
   ["1920x1080"] = { left = 220, top = 195, width = 108, height = 117 },
@@ -461,25 +419,32 @@ end
 
 local function makeRingElements(usage, diameter)
   local center = { x = diameter / 2, y = diameter / 2 }
-  local primary = usage.primaryRemaining or 0
-  local secondary = usage.secondaryRemaining or 0
+  local elements = {}
+  local remainderColor = { red = 0.22, green = 0.27, blue = 0.31, alpha = 0.62 }
 
-  local function arc(radius, percent, color)
+  local function segment(radius, startAngle, endAngle, color)
     return {
       type = "arc", action = "stroke", center = center, radius = radius,
-      startAngle = -90, endAngle = -90 + 360 * percent / 100,
+      startAngle = startAngle, endAngle = endAngle,
       arcRadii = false, arcClockwise = true, strokeWidth = 7,
-      strokeCapStyle = "round", strokeColor = color,
+      strokeCapStyle = "butt", strokeColor = color,
     }
   end
 
-  local elements = {
-    { type = "circle", action = "stroke", center = center, radius = diameter / 2 - 10, strokeWidth = 7, strokeColor = { red = 0.22, green = 0.27, blue = 0.31, alpha = 0.62 } },
-    arc(diameter / 2 - 10, primary, { red = 0.28, green = 1, blue = 0.72, alpha = 0.98 }),
-  }
+  local function addRing(radius, percent, color)
+    local value = clamp(percent or 0, 0, 100)
+    local progressEnd = -90 + 360 * value / 100
+    if value > 0 then
+      table.insert(elements, segment(radius, -90, progressEnd, color))
+    end
+    if value < 100 then
+      table.insert(elements, segment(radius, progressEnd, 270, remainderColor))
+    end
+  end
+
+  addRing(diameter / 2 - 10, usage.primaryRemaining, { red = 0.28, green = 1, blue = 0.72, alpha = 0.98 })
   if usage.secondaryRemaining ~= nil then
-    table.insert(elements, { type = "circle", action = "stroke", center = center, radius = diameter / 2 - 21, strokeWidth = 7, strokeColor = { red = 0.22, green = 0.27, blue = 0.31, alpha = 0.62 } })
-    table.insert(elements, arc(diameter / 2 - 21, usage.secondaryRemaining, { red = 0.22, green = 0.58, blue = 1, alpha = 0.98 }))
+    addRing(diameter / 2 - 21, usage.secondaryRemaining, { red = 0.22, green = 0.58, blue = 1, alpha = 0.98 })
   end
   return elements
 end

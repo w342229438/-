@@ -78,7 +78,7 @@ Hammerspoon `1.1.1`，生成的安装包会一并携带它。构建并生成安�
 ```zsh
 cd macos/pkg
 chmod +x build-unsigned-pkg.sh scripts/postinstall resources/Uninstall.command
-./build-unsigned-pkg.sh 1.1.5
+./build-unsigned-pkg.sh 1.1.6
 ```
 
 安装包位于 `macos/pkg/dist/`。它只会安装本项目的 Lua 脚本，并在现有
