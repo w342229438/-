@@ -3,8 +3,12 @@ Codex Pet Usage Overlay
 This unsigned installer copies the current Hammerspoon overlay script into your
 Hammerspoon configuration and appends a marked loading block to init.lua.
 
+It includes official Hammerspoon 1.1.1. If Hammerspoon is not already installed,
+the installer verifies its code signature and installs it to /Applications.
+Existing Hammerspoon installations are left unchanged.
+
 Requirements
-- Hammerspoon must be installed in /Applications/Hammerspoon.app.
+- macOS 13 or later is required by bundled Hammerspoon 1.1.1.
 - Hammerspoon needs the macOS permissions it normally requests.
 
 After installing

@@ -9,7 +9,7 @@ The package installs the overlay script without replacing the user's existing
 ```zsh
 cd macos/pkg
 chmod +x build-unsigned-pkg.sh scripts/postinstall resources/Uninstall.command
-./build-unsigned-pkg.sh 1.0.0
+./build-unsigned-pkg.sh 1.1.0
 ```
 
 The output is placed in `macos/pkg/dist/`.
@@ -17,11 +17,14 @@ The output is placed in `macos/pkg/dist/`.
 The package is intentionally unsigned. On another Mac, macOS may require the
 user to Control-click the package and select **Open** before installation.
 
-## Requirements
+## Bundled Hammerspoon
 
-The target Mac needs Hammerspoon in `/Applications/Hammerspoon.app`. The
-installer copies the script for the active macOS user, starts Hammerspoon when
-available, and leaves its standard permissions unchanged.
+The build script downloads the official Hammerspoon `1.1.1` ZIP from its GitHub
+release and verifies the included app signature before producing the package.
+The resulting installer includes it. On the target Mac, Hammerspoon is installed
+to `/Applications/Hammerspoon.app` only when it is not already present; an
+existing installation is never replaced. Hammerspoon `1.1.1` requires macOS 13
+or later.
 
 ## Uninstall
 

@@ -58,13 +58,13 @@ end
 
 ## macOS 未签名安装包
 
-仓库提供 Hammerspoon 版的未签名 `.pkg` 构建脚本。目标 Mac 需要先安装
-[Hammerspoon](https://www.hammerspoon.org/)。构建并生成安装包：
+仓库提供 Hammerspoon 版的未签名 `.pkg` 构建脚本。构建时会下载并校验官方
+Hammerspoon `1.1.1`，生成的安装包会一并携带它。构建并生成安装包：
 
 ```zsh
 cd macos/pkg
 chmod +x build-unsigned-pkg.sh scripts/postinstall resources/Uninstall.command
-./build-unsigned-pkg.sh 1.0.0
+./build-unsigned-pkg.sh 1.1.0
 ```
 
 安装包位于 `macos/pkg/dist/`。它只会安装本项目的 Lua 脚本，并在现有
@@ -79,8 +79,8 @@ chmod +x build-unsigned-pkg.sh scripts/postinstall resources/Uninstall.command
 ### 使用发布版安装
 
 1. 从 [GitHub Releases](https://github.com/w342229438/-/releases/latest) 下载 `CodexPetUsageOverlay-*-unsigned.pkg`。
-2. 确认 Hammerspoon 已安装到 `/Applications/Hammerspoon.app`。首次使用时，按 Hammerspoon 的提示授予所需的 macOS 权限。
-3. 双击 `.pkg` 并完成系统安装流程。若 macOS 阻止打开，按住 Control 点击安装包，再选择“打开”。
+2. 双击 `.pkg` 并完成系统安装流程。若 Mac 尚未安装 Hammerspoon，安装器会自动安装官方 Hammerspoon `1.1.1`；已有版本不会被替换。该版本要求 macOS 13 或更高。
+3. 若 macOS 阻止打开，按住 Control 点击安装包，再选择“打开”。首次使用时，按 Hammerspoon 的提示授予所需的 macOS 权限。
 4. 安装器会打开 Hammerspoon。随后打开 Codex Desktop 的 `/pet`，鼠标移到宠物上即可看到圆环；连续悬停 3 秒显示用量卡片。
 
 安装器只写入 `~/.hammerspoon/codex-pet-usage-overlay.lua`，并在 `init.lua` 增加一个带标记的加载块。它不会修改 Codex 本体，也不会覆盖其他 Hammerspoon 配置。

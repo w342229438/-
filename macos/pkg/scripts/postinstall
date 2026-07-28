@@ -20,6 +20,36 @@ extract_payload() {
   ' "$0" | /usr/bin/base64 -D
 }
 
+install_hammerspoon_if_needed() {
+  local target="/Applications/Hammerspoon.app"
+  local temporary_directory
+
+  if [[ -d "$target" ]]; then
+    log "Keeping existing Hammerspoon installation."
+    return
+  fi
+
+  temporary_directory="$(mktemp -d /private/tmp/codex-pet-hammerspoon.XXXXXX)"
+  extract_payload "HAMMERSPOON_ZIP" > "$temporary_directory/Hammerspoon.zip"
+  /usr/bin/unzip -q "$temporary_directory/Hammerspoon.zip" -d "$temporary_directory/unpacked"
+
+  if [[ ! -d "$temporary_directory/unpacked/Hammerspoon.app" ]]; then
+    log "Bundled Hammerspoon app is missing."
+    rm -rf "$temporary_directory"
+    exit 1
+  fi
+
+  if ! /usr/bin/codesign --verify --deep --strict "$temporary_directory/unpacked/Hammerspoon.app"; then
+    log "Bundled Hammerspoon signature verification failed."
+    rm -rf "$temporary_directory"
+    exit 1
+  fi
+
+  /usr/bin/ditto "$temporary_directory/unpacked/Hammerspoon.app" "$target"
+  rm -rf "$temporary_directory"
+  log "Installed bundled Hammerspoon to $target."
+}
+
 console_user="$(stat -f '%Su' /dev/console)"
 if [[ -z "$console_user" || "$console_user" == "root" || "$console_user" == "loginwindow" ]]; then
   log "No logged-in user found. Open the installer again after signing in."
@@ -32,6 +62,8 @@ user_group="$(id -gn "$console_user")"
 config_dir="$user_home/.hammerspoon"
 target="$config_dir/codex-pet-usage-overlay.lua"
 init_file="$config_dir/init.lua"
+
+install_hammerspoon_if_needed
 
 install -d -m 755 -o "$console_user" -g "$user_group" "$config_dir"
 extract_payload "OVERLAY" > "$target"
