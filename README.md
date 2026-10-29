@@ -24,6 +24,8 @@
 
 当前仓库补充了 macOS Swift/AppKit 适配版、Hammerspoon 悬浮层，以及宠物悬停圆环和延迟用量卡片交互。
 
+`2.0.0` 针对内置于 `ChatGPT.app` 的 Codex `26.1007` 状态格式重新实现定位和生命周期管理。
+
 ## 平台
 
 - Windows：使用仓库根目录的 `.bat` / `CodexPetUsageOverlay.ps1`。
@@ -32,8 +34,10 @@
 
 ## 功能
 
-- 鼠标移动到 Codex `/pet` 身上时显示透明悬浮层，并保持 10 秒。
+- 鼠标移动到 Codex `/pet` 身上时立即显示透明用量圆环；移开后立即隐藏。
 - 连续悬停宠物 3 秒后显示用量卡片，同时隐藏圆环；鼠标移开后自动收起。
+- 只读取当前活动显示器的宠物坐标，自动适配 Retina 缩放与多显示器坐标。
+- 自动接管旧画布并停止旧 Swift 伴随层，避免出现第二个独立圆环。
 - 外圈显示 5 小时窗口剩余用量。
 - 内圈显示 7 天窗口剩余用量。
 - 中文显示剩余百分比和刷新倒计时。
@@ -78,7 +82,7 @@ Hammerspoon `1.1.1`，生成的安装包会一并携带它。构建并生成安�
 ```zsh
 cd macos/pkg
 chmod +x build-unsigned-pkg.sh scripts/postinstall resources/Uninstall.command
-./build-unsigned-pkg.sh 1.1.7
+./build-unsigned-pkg.sh 2.0.0
 ```
 
 安装包位于 `macos/pkg/dist/`。它只会安装本项目的 Lua 脚本，并在现有
@@ -96,6 +100,8 @@ chmod +x build-unsigned-pkg.sh scripts/postinstall resources/Uninstall.command
 2. 双击 `.pkg` 并完成系统安装流程。若 Mac 尚未安装 Hammerspoon，安装器会自动安装官方 Hammerspoon `1.1.1`；已有版本不会被替换。该版本要求 macOS 13 或更高。
 3. 若 macOS 阻止打开，按住 Control 点击安装包，再选择“打开”。首次使用时，按 Hammerspoon 的提示授予所需的 macOS 权限。
 4. 安装器会打开 Hammerspoon。随后打开 Codex Desktop 的 `/pet`，鼠标移到宠物上即可看到圆环；连续悬停 3 秒显示用量卡片。
+
+从 `1.x` 升级时，安装器会停止并移除旧 Swift 后台伴随层，防止旧组件继续绘制第二个圆环；不会改动其他 Hammerspoon 模块。
 
 安装器只写入 `~/.hammerspoon/codex-pet-usage-overlay.lua`，并在 `init.lua` 增加一个带标记的加载块。它不会修改 Codex 本体，也不会覆盖其他 Hammerspoon 配置。
 

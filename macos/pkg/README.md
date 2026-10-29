@@ -9,7 +9,7 @@ The package installs the overlay script without replacing the user's existing
 ```zsh
 cd macos/pkg
 chmod +x build-unsigned-pkg.sh scripts/postinstall resources/Uninstall.command
-./build-unsigned-pkg.sh 1.1.7
+./build-unsigned-pkg.sh 2.0.0
 ```
 
 The output is placed in `macos/pkg/dist/`.
@@ -25,6 +25,9 @@ The resulting installer includes it. On the target Mac, Hammerspoon is installed
 to `/Applications/Hammerspoon.app` only when it is not already present; an
 existing installation is never replaced. Hammerspoon `1.1.1` requires macOS 13
 or later.
+
+When upgrading from a pre-2.0 build, the installer stops and removes the known
+legacy Swift overlay components so that only one ring renderer remains active.
 
 ## Uninstall
 

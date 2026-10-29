@@ -64,6 +64,19 @@ user_group="$(id -gn "$console_user")"
 config_dir="$user_home/.hammerspoon"
 target="$config_dir/codex-pet-usage-overlay.lua"
 init_file="$config_dir/init.lua"
+legacy_dir="$user_home/Library/Application Support/CodexPetUsageOverlay"
+legacy_agent="$user_home/Library/LaunchAgents/dev.jimmyasksai.codex-pet-usage-overlay.plist"
+
+# Versions before 2.0 shipped a separate Swift overlay. If it is still alive it
+# draws a second ring, so upgrades retire only those known legacy components.
+if [[ -f "$legacy_agent" ]]; then
+  launchctl asuser "$user_uid" launchctl bootout "gui/$user_uid" "$legacy_agent" >/dev/null 2>&1 || true
+  rm -f "$legacy_agent"
+fi
+pkill -u "$user_uid" -x codex-pet-usage-overlay-mac >/dev/null 2>&1 || true
+pkill -u "$user_uid" -x CodexPetUsageOverlay >/dev/null 2>&1 || true
+rm -rf "$legacy_dir/CodexPetUsageOverlay.app" "$legacy_dir/CodexPetUsageOverlay2.app"
+rm -f "$legacy_dir/codex-pet-usage-overlay-mac" "$legacy_dir/overlay.pid"
 
 install_hammerspoon_if_needed
 

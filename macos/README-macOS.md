@@ -2,7 +2,9 @@
 
 这是 Windows 版 `CodexPetUsageOverlay.ps1` 的 macOS 适配实现。它不修改 Codex，只读取本机 Codex 状态文件定位 `/pet`，并用本机 Codex 登录态查询用量。
 
-macOS 版默认在 `/pet` 打开时常驻显示在宠物旁边，不再依赖精确 hover 触发；这样在多屏和竖屏环境里更容易确认悬浮层正在工作。
+当前推荐使用仓库中的 Hammerspoon 2.0 实现：鼠标移到宠物上立即显示圆环，连续悬停 3 秒切换为详情卡片，移开后隐藏。它针对内置于 `ChatGPT.app` 的 Codex 26.x 状态格式重新适配，并支持 Retina 与多屏坐标换算。
+
+本目录中的 Swift/AppKit 实现作为旧版兼容代码保留，不应与 Hammerspoon 版同时运行，否则会出现重复圆环。
 
 ## 运行
 

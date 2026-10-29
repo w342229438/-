@@ -1,5 +1,24 @@
 local M = {}
 
+local moduleRegistryKey = "__codexPetUsageOverlayModule"
+local canvasRegistryKey = "__codexPetUsageOverlayCanvases"
+local previousModule = rawget(_G, moduleRegistryKey)
+if type(previousModule) == "table" and type(previousModule.stop) == "function" then
+  pcall(previousModule.stop)
+end
+local previousCanvases = rawget(_G, canvasRegistryKey)
+if type(previousCanvases) == "table" then
+  for _, canvas in pairs(previousCanvases) do
+    pcall(function() canvas:delete() end)
+  end
+end
+rawset(_G, moduleRegistryKey, M)
+
+-- Load the two interaction-critical extensions during config startup. Loading
+-- hs.canvas lazily on the first hover can otherwise delay the first ring.
+local canvasModule = hs.canvas
+local mouseModule = hs.mouse
+
 local home = os.getenv("HOME") or "/Users/bzj"
 local statePath = home .. "/.codex/.codex-global-state.json"
 local logPaths = {
@@ -11,18 +30,21 @@ local canvases = {}
 local canvasStates = {}
 local timer = nil
 local screenWatcher = nil
+local stateWatcher = nil
+local mouseWatcher = nil
+local wakeTimer = nil
+local wakeUpdate = nil
 local currentUsage = { available = false, source = "none", observedAt = os.time() }
 local lastUsageRead = 0
-local usageRefreshTimer = nil
+local usageRequestInFlight = false
 local cachedState = nil
-local hasCachedState = false
-local lastStateReadAt = 0
+local codexRunning = false
+local lastCodexCheckAt = 0
 
-local idlePollSeconds = 0.25
-local activePollSeconds = 0.1
-local idleStateReadSeconds = 0.5
-local activeStateReadSeconds = 0.25
+local idlePollSeconds = 0.1
 local usageRefreshSeconds = 15
+
+rawset(_G, canvasRegistryKey, canvases)
 
 local function readFile(path)
   local f = io.open(path, "r")
@@ -47,21 +69,23 @@ local function readState()
   return nil
 end
 
-local function readCachedState(active)
-  local now = hs.timer.secondsSinceEpoch()
-  local interval = active and activeStateReadSeconds or idleStateReadSeconds
-  if hasCachedState and now - lastStateReadAt < interval then
-    return cachedState
-  end
-
+local function refreshCachedState()
   cachedState = readState()
-  hasCachedState = true
-  lastStateReadAt = now
   return cachedState
 end
 
-local function shellQuote(value)
-  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+local function isCodexRunning()
+  local now = hs.timer.secondsSinceEpoch()
+  if now - lastCodexCheckAt < 1 then return codexRunning end
+  lastCodexCheckAt = now
+  codexRunning = false
+  for _, bundleId in ipairs({ "com.openai.codex", "com.openai.chat" }) do
+    if #(hs.application.applicationsForBundleID(bundleId) or {}) > 0 then
+      codexRunning = true
+      break
+    end
+  end
+  return codexRunning
 end
 
 local function jsonObjectAt(text, startIndex)
@@ -180,77 +204,86 @@ local function convertUsage(payload)
   }
 end
 
-local function readLiveUsage()
+local function readLiveUsage(callback)
   local authBody = readFile(home .. "/.codex/auth.json")
-  if not authBody then return nil end
+  if not authBody then callback(nil); return end
 
   local authOk, auth = pcall(hs.json.decode, authBody)
   local token = authOk and type(auth) == "table" and type(auth.tokens) == "table" and auth.tokens.access_token
-  if type(token) ~= "string" or token == "" then return nil end
+  if type(token) ~= "string" or token == "" then callback(nil); return end
 
-  local cmd = "/usr/bin/curl --silent --show-error --fail --max-time 15 -H "
-    .. shellQuote("Authorization: Bearer " .. token)
-    .. " -H " .. shellQuote("Accept: application/json")
-    .. " " .. shellQuote("https://chatgpt.com/backend-api/wham/usage")
-  local output, ok = hs.execute(cmd, true)
-  if not ok or not output or output == "" then return nil end
+  hs.http.asyncGet("https://chatgpt.com/backend-api/wham/usage", {
+    ["Authorization"] = "Bearer " .. token,
+    ["Accept"] = "application/json",
+  }, function(status, body)
+    if status < 200 or status >= 300 or type(body) ~= "string" or body == "" then
+      callback(nil)
+      return
+    end
+    local decodedOk, payload = pcall(hs.json.decode, body)
+    if not decodedOk or type(payload) ~= "table" then callback(nil); return end
+    local usage = convertUsage(payload)
+    if usage then usage.source = "实时" end
+    callback(usage)
+  end)
+end
 
-  local decodedOk, payload = pcall(hs.json.decode, output)
-  if not decodedOk or type(payload) ~= "table" then return nil end
+local function readLocalUsage(callback, index)
+  local query = "SELECT feedback_log_body FROM logs WHERE feedback_log_body LIKE '%codex.rate_limits%' ORDER BY ts DESC, ts_nanos DESC, id DESC LIMIT 25;"
+  local pathIndex = index or 1
+  local path = logPaths[pathIndex]
+  if not path then callback(nil); return end
+  if not fileExists(path) then
+    readLocalUsage(callback, pathIndex + 1)
+    return
+  end
 
-  local usage = convertUsage(payload)
-  if usage then usage.source = "实时" end
-  return usage
+  hs.task.new("/usr/bin/sqlite3", function(exitCode, output)
+    if exitCode == 0 and output and output ~= "" then
+      local decodedOk, rows = pcall(hs.json.decode, output)
+      if decodedOk and type(rows) == "table" then
+        for _, row in ipairs(rows) do
+          local payload = payloadFromLogBody(row.feedback_log_body)
+          local usage = convertUsage(payload)
+          if usage then callback(usage); return end
+        end
+      end
+    end
+    readLocalUsage(callback, pathIndex + 1)
+  end, { "-json", path, query }):start()
 end
 
 local function readUsage(force)
   local now = os.time()
-  if not force and now - lastUsageRead < usageRefreshSeconds then
+  if usageRequestInFlight or (not force and now - lastUsageRead < usageRefreshSeconds) then
     return currentUsage
   end
 
   lastUsageRead = now
-  local live = readLiveUsage()
-  if live then
-    currentUsage = live
-    return currentUsage
-  end
-
-  local query = "SELECT feedback_log_body FROM logs WHERE feedback_log_body LIKE '%codex.rate_limits%' ORDER BY ts DESC, ts_nanos DESC, id DESC LIMIT 25;"
-
-  for _, path in ipairs(logPaths) do
-    if fileExists(path) then
-      local cmd = "/usr/bin/sqlite3 -json " .. shellQuote(path) .. " " .. shellQuote(query)
-      local output, ok = hs.execute(cmd, true)
-      if ok and output and output ~= "" then
-        local decodedOk, rows = pcall(hs.json.decode, output)
-        if decodedOk and type(rows) == "table" then
-          for _, row in ipairs(rows) do
-            local payload = payloadFromLogBody(row.feedback_log_body)
-            local usage = convertUsage(payload)
-            if usage then
-              currentUsage = usage
-              return currentUsage
-            end
-          end
-        end
+  usageRequestInFlight = true
+  readLiveUsage(function(live)
+    local function finish(usage)
+      usageRequestInFlight = false
+      if usage then
+        currentUsage = usage
+      elseif not currentUsage.available then
+        currentUsage = { available = false, source = "none", observedAt = os.time() }
       end
+      if wakeUpdate then wakeUpdate() end
     end
-  end
 
-  if not currentUsage.available then
-    currentUsage = { available = false, source = "none", observedAt = now }
-  end
+    if live then
+      finish(live)
+    else
+      readLocalUsage(finish)
+    end
+  end)
+
   return currentUsage
 end
 
 local function refreshUsageLater()
-  if usageRefreshTimer or os.time() - lastUsageRead < usageRefreshSeconds then return end
-
-  usageRefreshTimer = hs.timer.doAfter(0.25, function()
-    usageRefreshTimer = nil
-    readUsage(false)
-  end)
+  readUsage(false)
 end
 
 local function formatDuration(timestamp)
@@ -302,83 +335,77 @@ local function clamp(v, lo, hi)
   return v
 end
 
-local mascotSizes = {
-  ["1080x1920"] = { width = 108, height = 117 },
-  ["1920x1080"] = { width = 108, height = 117 },
-}
-
-local function boundsCandidates(bounds, display)
-  local candidates = { bounds }
-  local byDisplay = type(bounds.byDisplayId) == "table" and bounds.byDisplayId
+local function activeBoundsRecord(bounds)
   local displayId = bounds.displayId
-  if byDisplay and displayId ~= nil then
-    if type(byDisplay[displayId]) == "table" then table.insert(candidates, byDisplay[displayId]) end
-    if type(byDisplay[tostring(displayId)]) == "table" then table.insert(candidates, byDisplay[tostring(displayId)]) end
+  local byDisplay = type(bounds.byDisplayId) == "table" and bounds.byDisplayId
+  local stored = byDisplay and (byDisplay[displayId] or byDisplay[tostring(displayId)])
+  if type(stored) ~= "table" then return bounds end
+
+  -- Codex keeps historical records for every display. Only enrich the active
+  -- record when it describes the same pet position as the top-level record.
+  if tonumber(bounds.x) and tonumber(bounds.y) and tonumber(stored.x) and tonumber(stored.y)
+    and math.abs(bounds.x - stored.x) <= 1 and math.abs(bounds.y - stored.y) <= 1 then
+    local merged = {}
+    for key, value in pairs(stored) do merged[key] = value end
+    for key, value in pairs(bounds) do
+      if key ~= "byDisplayId" and key ~= "byResolution" then merged[key] = value end
+    end
+    return merged
   end
-  if type(bounds.byResolution) == "table" then
-    local byResolution = bounds.byResolution[string.format("%dx%d", display.width or 0, display.height or 0)]
-    if type(byResolution) == "table" then table.insert(candidates, byResolution) end
-  end
-  return candidates
+  return bounds
 end
 
-local function petGeometryForBounds(bounds, display)
-  local candidates = boundsCandidates(bounds, display)
-  for _, candidate in ipairs(candidates) do
-    if type(candidate) == "table" and type(candidate.anchor) == "table" then
-      local anchor = candidate.anchor
-      if tonumber(anchor.x) and tonumber(anchor.y) then
-        return {
-          x = anchor.x,
-          y = anchor.y,
-          w = anchor.width or 108,
-          h = anchor.height or 117,
-        }
-      end
-    end
-    if type(candidate) == "table" and type(candidate.mascot) == "table"
-      and tonumber(candidate.x) and tonumber(candidate.y) then
-      local mascot = candidate.mascot
-      return {
-        x = candidate.x + (mascot.left or 0),
-        y = candidate.y + (mascot.top or 0),
-        w = mascot.width or 108,
-        h = mascot.height or 117,
-      }
+local function petGeometryForBounds(bounds)
+  if type(bounds.anchor) == "table" then
+    local anchor = bounds.anchor
+    if tonumber(anchor.x) and tonumber(anchor.y) then
+      return { x = anchor.x, y = anchor.y, w = anchor.width or 108, h = anchor.height or 117 }
     end
   end
 
-  -- Current Codex versions may publish only x/y. In that format those values
-  -- are already the pet's top-left position, not the legacy tray origin.
-  if tonumber(bounds.x) and tonumber(bounds.y) then
-    local size = mascotSizes[string.format("%dx%d", display.width or 0, display.height or 0)]
-      or { width = 108, height = 117 }
+  if type(bounds.mascot) == "table" and tonumber(bounds.x) and tonumber(bounds.y) then
+    local mascot = bounds.mascot
     return {
-      x = bounds.x,
-      y = bounds.y,
-      w = size.width,
-      h = size.height,
+      x = bounds.x + (mascot.left or 0),
+      y = bounds.y + (mascot.top or 0),
+      w = mascot.width or 108,
+      h = mascot.height or 117,
     }
+  end
+
+  -- ChatGPT/Codex 26.x publishes the pet's top-left point directly.
+  if tonumber(bounds.x) and tonumber(bounds.y) then
+    return { x = bounds.x, y = bounds.y, w = 108, h = 117 }
   end
   return nil
 end
 
 local function targetFromBounds(bounds)
   if type(bounds) ~= "table" then return nil end
-  local display = bounds.displayBounds or { x = 0, y = 0, width = 1280, height = 720 }
-  local geometry = petGeometryForBounds(bounds, display)
+  local activeBounds = activeBoundsRecord(bounds)
+  local display = activeBounds.displayBounds or bounds.displayBounds
+  if type(display) ~= "table" or not tonumber(display.width) or not tonumber(display.height) then return nil end
+  local geometry = petGeometryForBounds(activeBounds)
   if not geometry then return nil end
-  local screen = matchingScreenFrame(display, bounds.displayId)
   local localX = geometry.x - (display.x or 0)
   local localY = geometry.y - (display.y or 0)
+  if localX + geometry.w < -16 or localY + geometry.h < -16
+    or localX > display.width + 16 or localY > display.height + 16 then
+    return nil
+  end
+
+  local screen = matchingScreenFrame(display, activeBounds.displayId or bounds.displayId)
+  if not screen then return nil end
+  local scaleX = screen.w / display.width
+  local scaleY = screen.h / display.height
 
   return {
     screen = screen,
     pet = {
-      x = screen.x + localX,
-      y = screen.y + localY,
-      w = geometry.w,
-      h = geometry.h,
+      x = screen.x + localX * scaleX,
+      y = screen.y + localY * scaleY,
+      w = geometry.w * scaleX,
+      h = geometry.h * scaleY,
     },
   }
 end
@@ -416,7 +443,7 @@ local function cardFrameForPet(target)
 end
 
 local function mouseIsOverPet(target)
-  local cursor = hs.mouse.absolutePosition()
+  local cursor = mouseModule.absolutePosition()
   local pet = target.pet
   local padding = 8
   if cursor.x >= pet.x - padding and cursor.x <= pet.x + pet.w + padding
@@ -522,7 +549,7 @@ local function setCanvas(index, frame, elements, signature)
   local state = canvasStates[index]
   if state and state.visible and state.signature == signature then return end
 
-  canvases[index] = canvases[index] or hs.canvas.new(frame)
+  canvases[index] = canvases[index] or canvasModule.new(frame)
   canvases[index]:frame(frame)
   canvases[index]:replaceElements(elements)
   canvases[index]:level(hs.canvas.windowLevels.screenSaver or hs.canvas.windowLevels.overlay)
@@ -547,21 +574,34 @@ local function discardCanvases()
   end
   canvases = {}
   canvasStates = {}
+  rawset(_G, canvasRegistryKey, canvases)
+end
+
+local function terminateLegacyOverlays()
+  for _, bundleId in ipairs({
+    "dev.jimmyasksai.codex-pet-usage-overlay",
+    "dev.jimmyasksai.CodexPetUsageOverlay2",
+  }) do
+    for _, app in ipairs(hs.application.applicationsForBundleID(bundleId) or {}) do
+      pcall(function() app:terminate() end)
+    end
+  end
+  hs.execute("/usr/bin/pkill -x codex-pet-usage-overlay-mac >/dev/null 2>&1 || true", true)
+  hs.execute("/usr/bin/pkill -x CodexPetUsageOverlay >/dev/null 2>&1 || true", true)
 end
 
 local function update()
   if hs.timer.secondsSinceEpoch() < startupHideUntil then
     hideAll()
-    return idlePollSeconds
+    return
   end
 
-  local active = hoverStartedAt ~= nil or visibleCardFrame ~= nil
-  local state = readCachedState(active)
-  if not state or not state["electron-avatar-overlay-open"] then
+  local state = cachedState
+  if not isCodexRunning() or not state or not state["electron-avatar-overlay-open"] then
     hoverStartedAt = nil
     visibleCardFrame = nil
     hideAll()
-    return idlePollSeconds
+    return
   end
 
   local target = targetFromBounds(state["electron-avatar-overlay-bounds"])
@@ -569,7 +609,7 @@ local function update()
     hoverStartedAt = nil
     visibleCardFrame = nil
     hideAll()
-    return idlePollSeconds
+    return
   end
 
   local interacting, hoveredPet = mouseIsInInteractionRegion(target)
@@ -577,15 +617,16 @@ local function update()
     hoverStartedAt = nil
     visibleCardFrame = nil
     hideAll()
-    return idlePollSeconds
+    return
   end
 
   target.pet = hoveredPet
-  if hoveredPet and not hoverStartedAt then hoverStartedAt = os.time() end
+  local now = hs.timer.secondsSinceEpoch()
+  if hoveredPet and not hoverStartedAt then hoverStartedAt = now end
   local usage = currentUsage
   refreshUsageLater()
 
-  if hoverStartedAt and os.time() - hoverStartedAt >= hoverCardDelaySeconds then
+  if hoverStartedAt and now - hoverStartedAt >= hoverCardDelaySeconds then
     local cardFrame = cardFrameForPet(target)
     visibleCardFrame = cardFrame
     hideCanvas(1)
@@ -596,25 +637,28 @@ local function update()
     setCanvas(1, ringFrame, makeRingElements(usage, ringFrame.w), "ring:" .. frameSignature(ringFrame) .. ":" .. usageSignature(usage))
     hideCanvas(2)
   end
-
-  return activePollSeconds
 end
 
-local function scheduleUpdate(delay)
-  if timer then timer:stop() end
-  timer = hs.timer.doAfter(delay, function()
-    timer = nil
-    scheduleUpdate(update())
+wakeUpdate = function()
+  if wakeTimer then return end
+  wakeTimer = hs.timer.doAfter(0.01, function()
+    wakeTimer = nil
+    update()
   end)
 end
 
 function M.start()
   if timer then timer:stop() end
   if screenWatcher then screenWatcher:stop() end
+  if stateWatcher then stateWatcher:stop() end
+  if mouseWatcher then mouseWatcher:stop() end
+  if wakeTimer then wakeTimer:stop(); wakeTimer = nil end
+  terminateLegacyOverlays()
   hideAll()
   hoverStartedAt = nil
   visibleCardFrame = nil
-  startupHideUntil = hs.timer.secondsSinceEpoch() + 0.5
+  startupHideUntil = hs.timer.secondsSinceEpoch() + 0.2
+  refreshCachedState()
   screenWatcher = hs.screen.watcher.new(function()
     -- Canvas windows can become orphaned when macOS rearranges displays.
     -- Recreate them lazily against the new screen geometry on the next tick.
@@ -623,23 +667,37 @@ function M.start()
     discardCanvases()
   end)
   screenWatcher:start()
+  stateWatcher = hs.pathwatcher.new(statePath, function()
+    refreshCachedState()
+    wakeUpdate()
+  end)
+  stateWatcher:start()
+  mouseWatcher = hs.eventtap.new({ hs.eventtap.event.types.mouseMoved }, function()
+    wakeUpdate()
+    return false
+  end)
+  mouseWatcher:start()
   readUsage(true)
-  scheduleUpdate(update())
+  timer = hs.timer.doEvery(idlePollSeconds, update)
+  update()
   hs.alert.show("Codex /pet 悬停圆环已启动", 2)
 end
 
 function M.stop()
   if timer then timer:stop(); timer = nil end
-  if usageRefreshTimer then usageRefreshTimer:stop(); usageRefreshTimer = nil end
   if screenWatcher then screenWatcher:stop(); screenWatcher = nil end
+  if stateWatcher then stateWatcher:stop(); stateWatcher = nil end
+  if mouseWatcher then mouseWatcher:stop(); mouseWatcher = nil end
+  if wakeTimer then wakeTimer:stop(); wakeTimer = nil end
   cachedState = nil
-  hasCachedState = false
-  lastStateReadAt = 0
+  codexRunning = false
+  lastCodexCheckAt = 0
   hoverStartedAt = nil
   visibleCardFrame = nil
   startupHideUntil = 0
   hideAll()
   discardCanvases()
+  if rawget(_G, moduleRegistryKey) == M then rawset(_G, moduleRegistryKey, nil) end
 end
 
 M.start()

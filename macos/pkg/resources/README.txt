@@ -3,6 +3,10 @@ Codex Pet Usage Overlay
 This unsigned installer copies the current Hammerspoon overlay script into your
 Hammerspoon configuration and appends a marked loading block to init.lua.
 
+Version 2.0 is rebuilt for Codex 26.x inside ChatGPT.app. It tracks only the
+active pet, handles Retina/multi-display coordinates, and removes the legacy
+Swift renderer during upgrades to prevent duplicate rings.
+
 It includes official Hammerspoon 1.1.1. If Hammerspoon is not already installed,
 the installer verifies its code signature and installs it to /Applications.
 Existing Hammerspoon installations are left unchanged.

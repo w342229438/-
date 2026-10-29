@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
 REPO_ROOT="${SCRIPT_DIR:h:h}"
-VERSION="${1:-1.1.7}"
+VERSION="${1:-2.0.0}"
 PACKAGE_ID="com.w342229438.codex-pet-usage-overlay"
 HAMMERSPOON_VERSION="1.1.1"
 HAMMERSPOON_ARCHIVE="Hammerspoon-${HAMMERSPOON_VERSION}.zip"
